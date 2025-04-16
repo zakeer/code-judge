@@ -31,6 +31,8 @@ services:
       - PORT=4000
       - REDIS_HOST=redis
       - RABBITMQ_URL=amqp://admin:secure_password@rabbitmq:5672
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - redis
       - rabbitmq
