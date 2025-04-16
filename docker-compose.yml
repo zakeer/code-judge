@@ -1,6 +1,43 @@
 version: '3.8'
 
 services:
+  nginx:
+    image: nginx:1.25
+    container_name: judge_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - judge_network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: judge_app
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - REDIS_HOST=redis
+      - RABBITMQ_URL=amqp://admin:secure_password@rabbitmq:5672
+    depends_on:
+      - redis
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - judge_network
+
   rabbitmq:
     image: rabbitmq:3.12-management
     container_name: judge_rabbitmq
