@@ -1,6 +1,22 @@
-# Secure Online Judge System
+# Code Judge Worker Service
 
-A highly available, secure, and partition-tolerant online judge system for executing code in isolated environments. Built with Node.js, Docker, RabbitMQ, and Redis.
+A worker service for executing code submissions with RabbitMQ and Redis.
+
+## SSL Certificate Setup
+For development, we use self-signed SSL certificates. Follow these steps to set them up:
+
+1. Generate self-signed certificates:
+```bash
+# Run the certificate generation script
+sudo ./scripts/generate-ssl-cert.sh
+```
+
+2. For local development with curl, you can use the `-k` flag to skip certificate verification:
+```bash
+curl -k https://localhost/health
+```
+
+Note: In production, always use certificates from a trusted Certificate Authority.
 
 ## Prerequisites
 

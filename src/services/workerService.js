@@ -12,11 +12,35 @@ class WorkerService {
     this.retryCount = new Map();
   }
 
-  async initialize() {
-    try {
-      // Connect to RabbitMQ
+  async _connectWithRetry(connect, service, maxRetries = 5, initialDelay = 1000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await connect();
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        
+        const delay = initialDelay * Math.pow(2, attempt - 1);
+        console.log(`Failed to connect to ${service}, attempt ${attempt}/${maxRetries}. Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  async _initializeRabbitMQ() {
+    const connect = async () => {
       this.connection = await amqp.connect(config.rabbitmq.url);
       this.channel = await this.connection.createChannel();
+
+      // Set up error handlers
+      this.connection.on('error', (err) => {
+        console.error('RabbitMQ connection error:', err);
+        this._reconnectRabbitMQ();
+      });
+
+      this.connection.on('close', () => {
+        console.error('RabbitMQ connection closed unexpectedly');
+        this._reconnectRabbitMQ();
+      });
 
       // Assert queues
       await this.channel.assertQueue(config.rabbitmq.queues.execution, {
@@ -26,16 +50,44 @@ class WorkerService {
       });
 
       await this.channel.assertQueue(config.rabbitmq.queues.results);
-
-      // Set up consumer with prefetch
       await this.channel.prefetch(config.worker.concurrency);
       
-      // Start consuming messages
       this.channel.consume(
         config.rabbitmq.queues.execution,
         msg => this._processMessage(msg),
         { noAck: false }
       );
+    };
+
+    await this._connectWithRetry(connect, 'RabbitMQ');
+  }
+
+  async _reconnectRabbitMQ() {
+    try {
+      if (this.channel) {
+        await this.channel.close();
+      }
+      if (this.connection) {
+        await this.connection.close();
+      }
+    } catch (err) {
+      console.error('Error closing RabbitMQ connections:', err);
+    }
+
+    try {
+      await this._initializeRabbitMQ();
+      console.log('Successfully reconnected to RabbitMQ');
+    } catch (err) {
+      console.error('Failed to reconnect to RabbitMQ:', err);
+      // Try again in 5 seconds
+      setTimeout(() => this._reconnectRabbitMQ(), 5000);
+    }
+  }
+
+  async initialize() {
+    try {
+      // Initialize RabbitMQ with retry
+      await this._initializeRabbitMQ();
 
       // Set up health check interval
       this._startHealthCheck();
@@ -119,19 +171,27 @@ class WorkerService {
   }
 
   _createRedisClient() {
-    if (config.redis.cluster.enabled) {
-      return new Redis.Cluster(config.redis.cluster.nodes, {
-        redisOptions: {
-          password: config.redis.password
-        }
-      });
-    }
-
-    return new Redis({
+    const client = new Redis({
       host: config.redis.host,
       port: config.redis.port,
-      password: config.redis.password
+      password: config.redis.password,
+      retryStrategy: (times) => {
+        const delay = Math.min(times * 1000, 5000);
+        console.log(`Retrying Redis connection in ${delay}ms...`);
+        return delay;
+      },
+      maxRetriesPerRequest: 3
     });
+
+    client.on('error', (err) => {
+      console.error('Redis client error:', err);
+    });
+
+    client.on('connect', () => {
+      console.log('Successfully connected to Redis');
+    });
+
+    return client;
   }
 
   _startHealthCheck() {
